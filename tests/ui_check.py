@@ -149,17 +149,31 @@ try:
             page.evaluate("window.__nfm.map.jumpTo({center:[-111.93, 41.23], zoom: 12.5})")
             page.wait_for_function("window.__nfm.map.areTilesLoaded()", timeout=60000)
             time.sleep(1.5)
+            page.click("#close-right")
+            time.sleep(0.5)
+            # a stream vertex inside the uncovered map area (left panel ~340 px wide)
             pt = page.evaluate("""() => { const m = window.__nfm.map; const f = m.queryRenderedFeatures({layers:['streams']});
-                f.sort((a,b)=>b.properties.o-a.properties.o); if (!f.length) return null;
-                const g = f[0].geometry; const c = g.type === 'LineString' ? g.coordinates[Math.floor(g.coordinates.length/2)] : g.coordinates[0][0];
-                const p = m.project(c); return {x: p.x, y: p.y, n: f.length}; }""")
+                f.sort((a,b)=>b.properties.o-a.properties.o);
+                const W = m.getCanvas().clientWidth, H = m.getCanvas().clientHeight;
+                for (const ft of f) {
+                  const lines = ft.geometry.type === 'LineString' ? [ft.geometry.coordinates] : ft.geometry.coordinates;
+                  for (const line of lines) for (let i = 1; i < line.length; i++) {
+                    const a = m.project(line[i-1]), b = m.project(line[i]);
+                    const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
+                    if (x > 380 && x < W - 80 && y > 80 && y < H - 80) {
+                      const hit = m.queryRenderedFeatures([[x-3,y-3],[x+3,y+3]], {layers:['streams']});
+                      if (hit.length) return {x, y, n: f.length};
+                    }
+                  }
+                }
+                return null; }""")
             if pt:
                 box = page.locator("#map").bounding_box()
                 page.mouse.click(box["x"] + pt["x"], box["y"] + pt["y"])
                 time.sleep(1)
                 txt = page.inner_text("#details")
                 shot(page, "05_reach")
-                check("stream click opens reach panel with discharge", "Peak discharge" in txt, txt[:80].replace("\n", " | "))
+                check("stream click opens reach panel with discharge", "peak discharge" in txt.lower() and "m³/s" in txt, txt[:80].replace("\n", " | "))
             else:
                 check("stream features rendered at z12.5", False, "no stream features")
         else:

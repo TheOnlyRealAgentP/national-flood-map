@@ -145,3 +145,21 @@ GitHub Pages (repo national-flood-map)          Hugging Face dataset (national-f
   steps are 0.047 apart. Chose the best passing-contrast steps (light 300-700, dark 100-600,
   every step >= 2:1 vs the land color) and added a second channel: click any flooded spot for
   its exact periods; per-period toggles and single-period mode stay available.
+- 2026-11-13: owner: personal GitHub (TheOnlyRealAgentP, edu account) and the same HF account. Hosting
+  spike passed (302 -> us.aws.cdn.hf.co, 206 with ACAO on both hops, Content-Range exposed).
+  `huggingface_hub` 2.4 dropped `upload_large_folder`; publish_hf.py uses `upload_folder` with globs.
+- 2026-11-14: UI pass after a look at flood viewers and map-UI guidance (slider beats drop-down for
+  flood hazard maps, MDPI 2026; plain-language period meanings; bottom sheets on phones): period
+  slider + play, period descriptions, Photon place search, hillshade + optional 3D terrain (AWS
+  Terrain Tiles), collapsible panel with mini legend, loading bar, share link, intro card, 40 px
+  touch targets. Zoomed out (< z6.5) the OR-pooled raster read as a solid sheet, so watersheds are
+  shaded by % of area in the 100-yr floodplain (breaks 1/2.5/5/10/20%, median 4.1%) and the raster
+  fades in from z5.5 to z7. `idle` never fires while a source fails, so loading/export/ID search
+  wait on rendered tiles with a timeout instead.
+- 2026-11-14: reaches 2,109/2,109 HUC8s (2,150,677 unique reaches, 99.7% NHDPlusV2 match, 42.7% named);
+  10230006's organized raw/ files are 0 bytes -> fall back to Box; zips that read as "not a zip" are
+  read through once to make Box download them, then retried. Catalog: 2,109 mapped, 36 dry, 10 not
+  run, 244 no HAND. Two coastal HUC8s model no flooding (no GeoTIFF offered for them).
+- 2026-11-14: published: flood.pmtiles, cogs/ (2,107, 4.09 GB), reaches/ (2,109 CSVs), search/ ID shards
+  (42 MB, moved off Pages), metadata.json, dataset card on HF; site commits 09bd11b, fa17fc0, cbd3521.
+  Live UI check 12/15 (the 3 failures are the stream tiles, still building).
