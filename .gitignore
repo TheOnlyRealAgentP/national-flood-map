@@ -1,0 +1,7 @@
+build/work/
+dist/
+__pycache__/
+*.pyc
+*.partial
+.env
+node_modules/

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>National Flood Map</title>
+<meta name="description" content="Interactive map of 2- to 500-year flood extents for 2,100+ US watersheds, with stream discharge statistics and per-watershed metadata.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 20c4-4 8 4 12 0s8 4 12 0 4-2 4-2v12H2z' fill='%232a78d6'/%3E%3Cpath d='M2 14c4-4 8 4 12 0s8 4 12 0 4-2 4-2' stroke='%2386b6ef' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="icon-btn only-mobile" id="btn-panel" aria-label="Layers and legend" title="Layers and legend">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg>
+  </button>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 20c4-4 8 4 12 0s8 4 12 0 4-2 4-2v12H2z"/><path class="logo-wave" d="M2 14c4-4 8 4 12 0s8 4 12 0 4-2 4-2"/></svg>
+    <div>
+      <h1>National Flood Map</h1>
+      <p class="tagline">Return-period flood extents for US watersheds</p>
+    </div>
+  </div>
+  <div class="search" role="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+    <input id="search" type="search" placeholder="Search rivers, watersheds, HUC8 codes, reach IDs" autocomplete="off" aria-label="Search rivers and watersheds" aria-controls="search-results" aria-expanded="false">
+    <div id="search-results" class="search-results" role="listbox" hidden></div>
+  </div>
+  <nav class="actions">
+    <button class="btn" id="btn-stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Statistics</span></button>
+    <div class="menu-wrap">
+      <button class="btn" id="btn-export" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 17v3h16v-3"/></svg><span>Export</span></button>
+      <div class="menu" id="export-menu" hidden>
+        <button data-export="png">Map image (PNG)<small>Current view with legend</small></button>
+        <button data-export="huc">Selected watershed<small>Flood GeoTIFF, reach table, metadata</small></button>
+        <button data-export="stats">Statistics (CSV)<small>By state, region and stream order</small></button>
+        <button data-export="catalog">Watershed catalog (CSV)<small>Metadata for all 2,399 HUC8s</small></button>
+        <a href="data/metadata.json" download>Dataset metadata (JSON)<small>Sources, methods, data dictionary</small></a>
+      </div>
+    </div>
+    <button class="btn" id="btn-about"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg><span>About</span></button>
+    <button class="icon-btn" id="btn-theme" aria-label="Color theme" title="Color theme: automatic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" class="fill"/></svg></button>
+  </nav>
+</header>
+
+<main class="layout">
+  <aside class="panel left" id="panel-left" aria-label="Layers and legend">
+    <section class="card">
+      <div class="card-head">
+        <h2>Flood extent</h2>
+        <div class="seg" role="radiogroup" aria-label="Flood display mode">
+          <button role="radio" aria-checked="true" data-mode="stacked">All periods</button>
+          <button role="radio" aria-checked="false" data-mode="single">One period</button>
+        </div>
+      </div>
+      <p class="hint" id="mode-hint">Each place is colored by the most frequent flood that reaches it.</p>
+      <ul class="legend" id="legend"></ul>
+      <label class="row slider">Opacity <input type="range" id="opacity" min="0.2" max="1" step="0.05" value="0.85" aria-label="Flood layer opacity"></label>
+      <p class="note" id="note-500"></p>
+    </section>
+
+    <section class="card">
+      <h2>Layers</h2>
+      <label class="row check"><input type="checkbox" id="lyr-streams" checked> Stream network <span class="sub">NWM reaches</span></label>
+      <label class="row check"><input type="checkbox" id="lyr-huc8" checked> Watershed boundaries <span class="sub">HUC8</span></label>
+      <label class="row check"><input type="checkbox" id="lyr-coverage"> Mapping coverage</label>
+      <ul class="legend compact" id="coverage-legend" hidden></ul>
+    </section>
+
+    <section class="card">
+      <h2>Basemap</h2>
+      <div class="seg wide" role="radiogroup" aria-label="Basemap">
+        <button role="radio" aria-checked="true" data-base="map">Map</button>
+        <button role="radio" aria-checked="false" data-base="satellite">Satellite</button>
+        <button role="radio" aria-checked="false" data-base="relief">Relief</button>
+      </div>
+      <div class="seg wide" role="radiogroup" aria-label="Projection">
+        <button role="radio" aria-checked="true" data-proj="globe">Globe</button>
+        <button role="radio" aria-checked="false" data-proj="mercator">Flat</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Watersheds</h2>
+        <span class="sub" id="huc-count"></span>
+      </div>
+      <div class="filters">
+        <select id="f-state" aria-label="Filter by state"><option value="">All states</option></select>
+        <select id="f-status" aria-label="Filter by status">
+          <option value="">Any status</option>
+          <option value="mapped">Mapped</option>
+          <option value="dry">Run, no discharge</option>
+          <option value="notrun">Not run</option>
+          <option value="nohand">No NOAA HAND</option>
+        </select>
+      </div>
+      <input type="search" id="f-text" placeholder="Filter by name or code" aria-label="Filter watersheds by name or code">
+      <ul class="huc-list" id="huc-list"></ul>
+    </section>
+    <p class="disclaimer">Research product. Not a FEMA regulatory flood map. <a href="#" data-open="about">Read more</a></p>
+  </aside>
+
+  <div id="map" aria-label="Map"></div>
+
+  <aside class="panel right" id="panel-right" hidden aria-live="polite">
+    <button class="icon-btn close" id="close-right" aria-label="Close details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <div id="details"></div>
+  </aside>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<dialog id="dlg-stats" class="sheet" aria-labelledby="stats-title">
+  <div class="sheet-head">
+    <h2 id="stats-title">Statistics</h2>
+    <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sheet-body" id="stats-body"></div>
+</dialog>
+
+<dialog id="dlg-about" class="sheet" aria-labelledby="about-title">
+  <div class="sheet-head">
+    <h2 id="about-title">About this map</h2>
+    <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sheet-body prose" id="about-body">
+    <div class="callout">
+      <strong>Not a regulatory map.</strong> These are modeled flood extents from a national research
+      workflow. They are not FEMA Flood Insurance Rate Maps, do not show flood depth, and should not be used
+      for insurance, permitting, property decisions or emergency response. Local studies, levees, culverts,
+      dams and recent channel changes are not represented.
+    </div>
+
+    <h3>What the map shows</h3>
+    <p>For each mapped watershed (HUC8), the area that would be inundated by the peak flow of a given
+    <em>return period</em>: the 2-year flood (50% chance in any year), 5-, 10-, 25-, 50-, 100-year (1% annual
+    chance) and, where available, the 500-year flood (0.2% annual chance). In <em>All periods</em> mode each
+    place takes the color of the most frequent flood that reaches it, so the darker the blue, the more often it
+    floods.</p>
+
+    <h3>How it was made</h3>
+    <ol>
+      <li><strong>Terrain and rating curves.</strong> NOAA Office of Water Prediction HAND (Height Above Nearest
+      Drainage) data, release <span data-fill="hand"></span>, from the public CIROH bucket, run through
+      <a href="https://github.com/sdmlua/FIMserv" target="_blank" rel="noopener">FIMserv</a>.</li>
+      <li><strong>Return-period discharge</strong> for every National Water Model (NWM) reach, by one of two methods:
+        <ul>
+          <li><strong>CIROH</strong> (<span data-fill="m-ciroh"></span> watersheds): precomputed NWM return-period
+          flows from CIROH's API, 2 to 100 years. Reaches the API does not cover are left out of the flood map.</li>
+          <li><strong>LP-III</strong> (<span data-fill="m-lp3"></span> watersheds): a Log-Pearson Type III fit to the
+          annual peaks of the 44-year NWM v3.0 retrospective, 2 to 500 years.</li>
+        </ul>
+      </li>
+      <li><strong>Inundation.</strong> The HAND engine turns each reach's discharge into a stage and floods every
+      cell whose height above the stream is below it. Output is a 10 m flood extent per period.</li>
+      <li><strong>Web tiles.</strong> The extents are combined into one national tile set (9.55 m at the closest
+      zoom). Where watersheds meet, a pixel is wet if either side floods it. Zoomed out, a pixel is wet if anything
+      beneath it is, so narrow rivers stay visible.</li>
+    </ol>
+
+    <h3>Coverage</h3>
+    <p data-fill="coverage"></p>
+    <ul>
+      <li><strong>500-year</strong> extents exist only for the <span data-fill="n500"></span> watersheds mapped with
+      LP-III. Elsewhere the 100-year flood is the largest shown.</li>
+      <li><strong>Alaska, Hawaii, Puerto Rico, the US Virgin Islands and the Pacific islands:</strong> the HUC8s
+      that NOAA publishes HAND for were run, but CIROH has no return-period flows outside the lower 48, so they
+      have no flood extent yet. They show as "Run, no discharge".</li>
+      <li>Watersheds with no NOAA HAND (most of Alaska and the Pacific, Canadian and Mexican basins, open water)
+      cannot be mapped with this method.</li>
+    </ul>
+
+    <h3>Reading a stream</h3>
+    <p>Click any stream for its NWM reach: name (from NHDPlus V2 where it matches), stream order, length, slope,
+    upstream drainage area, USGS gage, the discharge for each return period, and the flooded area within the
+    reach's own catchment.</p>
+
+    <h3>Data dictionary</h3>
+    <div id="dictionary"></div>
+
+    <h3>Downloads</h3>
+    <p>Each watershed's panel links its flood GeoTIFF (one band, a bit mask of flooded periods; GIS software shows
+    it colored by its built-in color table), its reach table (CSV) and its metadata (JSON). The national tile sets
+    are on <a data-fill-href="hf" target="_blank" rel="noopener">Hugging Face</a>.</p>
+
+    <h3>Sources and credits</h3>
+    <ul>
+      <li>NOAA Office of Water Prediction: HAND FIM inputs, National Water Model v3.0 retrospective.</li>
+      <li>CIROH: NWM return-period flows API and the public HAND bucket.</li>
+      <li><a href="https://github.com/sdmlua/FIMserv" target="_blank" rel="noopener">FIMserv</a> (Surface
+      Dynamics Modeling Lab, University of Alabama).</li>
+      <li>USGS: Watershed Boundary Dataset, NHDPlus V2 attributes, The National Map imagery and shaded relief.</li>
+      <li>Basemap: <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>, ©
+      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</li>
+      <li>Related research: <a href="https://hydroinformatics.byu.edu" target="_blank" rel="noopener">BYU
+      Hydroinformatics Lab</a> publications.</li>
+    </ul>
+
+    <h3>License and citation</h3>
+    <p>Code: MIT. Data: CC BY 4.0. Please cite as:</p>
+    <pre class="cite" id="citation"></pre>
+    <p class="muted" data-fill="generated"></p>
+  </div>
+</dialog>
+
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
