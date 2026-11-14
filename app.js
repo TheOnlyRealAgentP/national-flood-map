@@ -12,13 +12,22 @@ const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const CONFIG = {
   // big files: Hugging Face dataset (resolve/main serves range requests with CORS)
   dataBase: LOCAL ? new URL('dist/', location.href).href
-                  : 'https://huggingface.co/datasets/HF_USER/national-flood-map-data/resolve/main/',
-  hfPage: 'https://huggingface.co/datasets/HF_USER/national-flood-map-data',
+                  : 'https://huggingface.co/datasets/TheOnlyRealAgentP/national-flood-map-data/resolve/main/',
+  hfPage: 'https://huggingface.co/datasets/TheOnlyRealAgentP/national-flood-map-data',
   site: new URL('./', location.href).href,
 };
 
 const PERIODS = [2, 5, 10, 25, 50, 100, 500];
 const CHANCE = { 2: '50%', 5: '20%', 10: '10%', 25: '4%', 50: '2%', 100: '1%', 500: '0.2%' };
+const DESC = {
+  2: 'Reached about every other year. Close to the land along the channel.',
+  5: 'A common high-water event, about once every five years on average.',
+  10: 'A 10% chance in any year; about two in three over a 10-year span.',
+  25: 'A 4% chance in any year; roughly a one-in-three chance over 10 years.',
+  50: 'A 2% chance in any year; larger floods reach well beyond the channel.',
+  100: 'A 1% chance in any year, the same odds as FEMA’s “base flood” (about one in four over a 30-year mortgage).',
+  500: 'A 0.2% chance in any year: a rare, extreme flood. Mapped only where the LP-III method was used.',
+};
 // Ordinal blue ramp; the most frequent flood gets the strongest contrast against the basemap.
 // Validated (dataviz validateOrdinal) against the basemap land color: every step clears 2:1,
 // lightness is monotone and single-hue. Seven classes in one hue cannot reach the 0.06 adjacent
@@ -26,7 +35,7 @@ const CHANCE = { 2: '50%', 5: '20%', 10: '10%', 25: '4%', 50: '2%', 100: '1%', 5
 // the click readout, the per-period toggles and single-period mode.
 const RAMP = {
   light: ['#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#3987e5', '#6da7ec'],
-  dark:  ['#cde2fb', '#9ec5f4', '#86b6ef', '#5598e7', '#3987e5', '#256abf', '#184f95'],
+  dark:  ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#184f95'],
 };
 const SINGLE = { light: '#1c5cab', dark: '#86b6ef' };
 const STATUS = {
@@ -35,7 +44,6 @@ const STATUS = {
   notrun: { label: 'Not run (HAND available)', color: '#6250d6' },
   nohand: { label: 'No NOAA HAND', color: '#9a9890' },
 };
-const STATE_NAMES = {}; // filled from catalog
 
 const state = {
   mode: 'stacked',            // stacked | single
@@ -48,6 +56,8 @@ const state = {
   streams: true,
   huc8: true,
   coverage: false,
+  terrain: false,
+  leftCollapsed: false,
   selectedHuc: null,
   selectedReach: null,
   highlightName: null,
@@ -214,6 +224,7 @@ function buildStyle() {
   return {
     version: 8,
     projection: { type: state.proj },
+    ...(state.terrain ? { terrain: { source: 'dem', exaggeration: 1.5 } } : {}),
     sky: isDark()
       ? { 'sky-color': '#0b1220', 'horizon-color': '#1c2a3a', 'fog-color': '#121a24', 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] }
       : { 'sky-color': '#bcd7f2', 'horizon-color': '#e9f1fa', 'fog-color': '#f3f6fa', 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] },
@@ -227,9 +238,15 @@ function buildStyle() {
       relief: { type: 'raster', tileSize: 256, maxzoom: 13,
         tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/tile/{z}/{y}/{x}'],
         attribution: 'Relief: USGS The National Map' },
+      // AWS Open Data terrain (Mapzen Terrarium encoding), keyless; one source for shading, one for 3D
+      'dem-hs': { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15,
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        attribution: 'Terrain: AWS Terrain Tiles' },
+      dem: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15,
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'] },
       flood: { type: 'raster', tileSize: 256, minzoom: 0, maxzoom: 14, tiles: [`flood://v${floodVersion}/{z}/{x}/{y}`],
         bounds: [-125.5, 24, -66.5, 49.6],
-        attribution: 'Flood extents: FIMserv / NOAA OWP HAND + NWM' },
+        attribution: 'Floods: FIMserv, NOAA OWP, NWM' },
       huc8: { type: 'vector', url: 'pmtiles://' + new URL('data/huc8.pmtiles', CONFIG.site).href, promoteId: 'h',
         attribution: 'Watersheds: USGS WBD' },
       streams: { type: 'vector', url: 'pmtiles://' + CONFIG.dataBase + 'streams.pmtiles', promoteId: 'id',
@@ -242,6 +259,11 @@ function buildStyle() {
         paint: { 'fill-color': ['match', ['get', 'class'], 'wood', p.wood, 'forest', p.wood, 'grass', p.grass, 'ice', p.ice, 'sand', p.sand, p.grass],
           'fill-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 10, 0.8] } },
       { id: 'park', type: 'fill', source: 'omt', 'source-layer': 'park', layout: { visibility: vis(vec) }, paint: { 'fill-color': p.park, 'fill-opacity': 0.6 } },
+      { id: 'hillshade', type: 'hillshade', source: 'dem-hs', layout: { visibility: vis(state.base === 'map' || state.terrain) },
+        paint: { 'hillshade-exaggeration': isDark() ? 0.25 : 0.3, 'hillshade-illumination-anchor': 'map',
+          'hillshade-shadow-color': isDark() ? 'rgba(0,0,0,0.55)' : 'rgba(70,60,40,0.35)',
+          'hillshade-highlight-color': isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.35)',
+          'hillshade-accent-color': isDark() ? 'rgba(0,0,0,0.3)' : 'rgba(70,60,40,0.2)' } },
       { id: 'relief', type: 'raster', source: 'relief', layout: { visibility: vis(relief) },
         paint: { 'raster-opacity': isDark() ? 0.35 : 0.55, 'raster-saturation': -1, 'raster-contrast': isDark() ? -0.2 : 0 } },
       { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', layout: { visibility: vis(vec) }, paint: { 'fill-color': p.water } },
@@ -264,7 +286,7 @@ function buildStyle() {
       { id: 'coverage', type: 'fill', source: 'huc8', 'source-layer': 'huc8', layout: { visibility: vis(state.coverage) },
         paint: { 'fill-color': coverageColor, 'fill-opacity': 0.35 } },
       { id: 'flood', type: 'raster', source: 'flood',
-        paint: { 'raster-opacity': state.opacity, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } },
+        paint: { 'raster-opacity': floodOpacity(), 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } },
       { id: 'streams-case', type: 'line', source: 'streams', 'source-layer': 'streams', layout: { visibility: vis(state.streams), 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': p.streamCase, 'line-width': sw(1.5) } },
       { id: 'streams', type: 'line', source: 'streams', 'source-layer': 'streams', layout: { visibility: vis(state.streams), 'line-cap': 'round', 'line-join': 'round' },
@@ -341,6 +363,12 @@ function initMap() {
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
   map.addControl(new maplibregl.GeolocateControl({ fitBoundsOptions: { maxZoom: 11 } }), 'top-right');
 
+  // thin loading bar while tiles are in flight (shown only if loading lasts > 250 ms)
+  let loadT = null;
+  map.on('dataloading', () => { if (!loadT) loadT = setTimeout(() => { $('#loading').hidden = false; }, 250); });
+  map.on('idle', () => { clearTimeout(loadT); loadT = null; $('#loading').hidden = true; });
+  map.once('load', () => { if (state.terrain) applyTerrain(false); });
+
   let hovered = null;
   const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
   map.on('mousemove', (e) => {
@@ -405,6 +433,13 @@ function pickReach(point) {
   return feats[0];
 }
 
+// Zoomed out, every pixel is the OR of many source pixels, so small creeks widen into bands;
+// fading the layer there keeps regional views calm, and it reaches full strength by zoom 11.
+function floodOpacity() {
+  const o = state.opacity;
+  return ['interpolate', ['linear'], ['zoom'], 5, o * 0.6, 8, o * 0.7, 11, o];
+}
+
 function restyle() {
   if (!map) return;
   map.setStyle(buildStyle(), { diff: true });
@@ -415,31 +450,78 @@ function restyle() {
 function renderLegend() {
   const ramp = RAMP[themeKey()];
   const has500 = STATS ? STATS.periods['500'].hucs : 0;
+  const single = state.mode === 'single';
+  $('#legend').hidden = single;
+  $('#rp-slider').hidden = !single;
   $('#legend').innerHTML = PERIODS.map((p, i) => {
-    const single = state.mode === 'single';
-    const on = single ? state.single === p : state.enabled.has(p);
-    const color = single ? SINGLE[themeKey()] : ramp[i];
-    const input = single
-      ? `<input type="radio" name="period" value="${p}" ${on ? 'checked' : ''}>`
-      : `<input type="checkbox" value="${p}" ${on ? 'checked' : ''}>`;
+    const on = state.enabled.has(p);
     const extra = p === 500 ? ` <span class="sub">${fmt(has500)} watersheds</span>` : '';
-    return `<li class="${on ? '' : 'off'}"><label>${input}<span class="sw" style="background:${color}"></span>
+    return `<li class="${on ? '' : 'off'}" title="${esc(DESC[p])}"><label><input type="checkbox" value="${p}" ${on ? 'checked' : ''}>
+      <span class="sw" style="background:${ramp[i]}"></span>
       <span class="lbl">${p}-year</span>${extra}<span class="chance">${CHANCE[p]}/yr</span></label></li>`;
   }).join('');
-  $('#mode-hint').textContent = state.mode === 'single'
-    ? 'Everything flooded by the chosen return period.'
+  $('#mode-hint').textContent = single
+    ? 'Everything the chosen flood reaches. Slide to watch the floodplain grow.'
     : 'Each place is colored by the most frequent flood that reaches it.';
   $$('#legend input').forEach((el) => el.addEventListener('change', () => {
     const p = Number(el.value);
-    if (state.mode === 'single') state.single = p;
-    else if (el.checked) state.enabled.add(p); else state.enabled.delete(p);
+    if (el.checked) state.enabled.add(p); else state.enabled.delete(p);
     saveState(); renderLegend(); refreshFlood();
   }));
+  // slider (single-period mode)
+  $('#rp-range').value = PERIODS.indexOf(state.single);
+  $('#rp-swatch').style.background = SINGLE[themeKey()];
+  $('#rp-label').textContent = `${state.single}-year flood`;
+  $('#rp-chance').textContent = `${CHANCE[state.single]} chance each year`;
+  $('#rp-desc').textContent = DESC[state.single];
+  renderMiniLegend();
   $('#note-500').textContent = has500
     ? `500-year extents exist only where the LP-III method was used (${fmt(has500)} watersheds). Elsewhere the 100-year flood is the largest.`
     : '';
   $('#coverage-legend').innerHTML = Object.entries(STATUS).map(([k, s]) =>
     `<li><span class="sw" style="background:${s.color};opacity:.7"></span>${s.label}<span class="chance">${fmt(STATS?.coverage.status[k] || 0)}</span></li>`).join('');
+}
+
+function renderMiniLegend() {
+  const el = $('#mini-legend');
+  if (state.mode === 'single') {
+    el.innerHTML = `<div><span class="sw" style="display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;background:${SINGLE[themeKey()]}"></span>
+      <strong>${state.single}-year flood</strong> · ${CHANCE[state.single]} chance each year</div>`;
+    return;
+  }
+  const ramp = RAMP[themeKey()];
+  const shown = PERIODS.filter((p) => state.enabled.has(p));
+  el.innerHTML = `<div><strong>Flood extent</strong> · most frequent flood reaching each place</div>
+    <div class="bar">${shown.map((p) => `<span style="background:${ramp[PERIODS.indexOf(p)]}" title="${p}-year"></span>`).join('')}</div>
+    <div class="lab">${shown.map((p) => `<span>${p}</span>`).join('')}</div><div style="text-align:right">years</div>`;
+}
+
+function setLeftCollapsed(c) {
+  state.leftCollapsed = c;
+  $('#panel-left').classList.toggle('collapsed', c);
+  $('#btn-open-left').hidden = !c;
+  $('#mini-legend').hidden = !c;
+  document.documentElement.style.setProperty('--left-w', c ? '0px' : '320px');
+  saveState();
+}
+
+let playTimer = null;
+function togglePlay() {
+  const btn = $('#rp-play');
+  if (playTimer) {
+    clearInterval(playTimer); playTimer = null;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="play" d="M8 5v14l11-7z"/></svg>';
+    btn.setAttribute('aria-label', 'Play through return periods');
+    return;
+  }
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="play" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+  btn.setAttribute('aria-label', 'Pause');
+  const step = () => {
+    const i = (PERIODS.indexOf(state.single) + 1) % PERIODS.length;
+    state.single = PERIODS[i]; renderLegend(); refreshFlood();
+  };
+  step();
+  playTimer = setInterval(step, 1600);
 }
 
 function setSeg(attr, val) {
@@ -458,7 +540,7 @@ function bindControls() {
     map.setProjection({ type: state.proj });
   }));
   $('#opacity').addEventListener('input', (e) => {
-    state.opacity = Number(e.target.value); map.setPaintProperty('flood', 'raster-opacity', state.opacity); saveState();
+    state.opacity = Number(e.target.value); map.setPaintProperty('flood', 'raster-opacity', floodOpacity()); saveState();
   });
   const layerToggle = (id, key) => $(id).addEventListener('change', (e) => {
     state[key] = e.target.checked; saveState(); restyle();
@@ -467,6 +549,22 @@ function bindControls() {
   layerToggle('#lyr-streams', 'streams');
   layerToggle('#lyr-huc8', 'huc8');
   layerToggle('#lyr-coverage', 'coverage');
+  $('#lyr-terrain').addEventListener('change', (e) => {
+    state.terrain = e.target.checked; saveState(); applyTerrain(true);
+  });
+  $('#rp-range').addEventListener('input', (e) => {
+    state.single = PERIODS[Number(e.target.value)]; saveState(); renderLegend(); refreshFlood();
+  });
+  $('#rp-play').addEventListener('click', togglePlay);
+  $('#btn-collapse-left').addEventListener('click', () => setLeftCollapsed(true));
+  $('#btn-open-left').addEventListener('click', () => setLeftCollapsed(false));
+  $('#btn-share').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(location.href); toast('Link to this view copied'); }
+    catch { prompt('Copy this link:', location.href); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); }
+  });
 
   $('#btn-theme').addEventListener('click', () => {
     state.theme = { auto: 'light', light: 'dark', dark: 'auto' }[state.theme];
@@ -507,7 +605,8 @@ function applyTheme() {
 
 function saveState() {
   store.set('state', { mode: state.mode, enabled: [...state.enabled], single: state.single, opacity: state.opacity,
-    base: state.base, proj: state.proj, theme: state.theme, streams: state.streams, huc8: state.huc8, coverage: state.coverage });
+    base: state.base, proj: state.proj, theme: state.theme, streams: state.streams, huc8: state.huc8, coverage: state.coverage,
+    terrain: state.terrain, leftCollapsed: state.leftCollapsed });
 }
 function loadState() {
   const s = store.get('state', null);
@@ -518,7 +617,21 @@ function syncControls() {
   setSeg('mode', state.mode); setSeg('base', state.base); setSeg('proj', state.proj);
   $('#opacity').value = state.opacity;
   $('#lyr-streams').checked = state.streams; $('#lyr-huc8').checked = state.huc8; $('#lyr-coverage').checked = state.coverage;
+  $('#lyr-terrain').checked = state.terrain;
   $('#coverage-legend').hidden = !state.coverage;
+  if (state.leftCollapsed && innerWidth > 760) setLeftCollapsed(true);
+}
+
+function applyTerrain(animate) {
+  if (!map) return;
+  if (state.terrain) {
+    map.setTerrain({ source: 'dem', exaggeration: 1.5 });
+    if (animate && map.getPitch() < 30) map.easeTo({ pitch: 55, duration: 900 });
+  } else {
+    map.setTerrain(null);
+    if (animate) map.easeTo({ pitch: 0, duration: 600 });
+  }
+  map.setLayoutProperty('hillshade', 'visibility', state.base === 'map' || state.terrain ? 'visible' : 'none');
 }
 
 /* ------------------------------------------------------------------ HUC8 list */
@@ -775,6 +888,27 @@ async function idLookup(id) {
   return d[String(id)] || null;
 }
 
+// Places and addresses: Photon (komoot), an OpenStreetMap geocoder that is free and keyless.
+// One request per paused query (debounced), results cached, US only.
+const geoCache = new Map();
+async function geocode(q) {
+  const key = q.toLowerCase();
+  if (geoCache.has(key)) return geoCache.get(key);
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=en&bbox=-179.2,17.5,-64.5,71.5`;
+  const p = fetch(url).then((r) => (r.ok ? r.json() : { features: [] })).then((j) => (j.features || [])
+    .filter((f) => (f.properties.countrycode || '').toUpperCase() === 'US')
+    .slice(0, 5)
+    .map((f) => {
+      const pr = f.properties, e = pr.extent;
+      const detail = [pr.city && pr.city !== pr.name ? pr.city : null, pr.county, pr.state].filter(Boolean).join(', ');
+      const name = pr.name || [pr.housenumber, pr.street].filter(Boolean).join(' ') || 'Place';
+      return { name: pr.housenumber && pr.street ? `${pr.housenumber} ${pr.street}` : name, detail: detail || (pr.osm_value || ''),
+        center: f.geometry.coordinates, bbox: e ? [e[0], e[3], e[2], e[1]] : null };
+    })).catch(() => []);
+  geoCache.set(key, p);
+  return p;
+}
+
 let searchItems = [], searchSel = -1;
 async function runSearch(q) {
   const box = $('#search-results');
@@ -789,6 +923,7 @@ async function runSearch(q) {
     if (at) items.unshift({ kind: 'reach', id: nq, at });
   }
   if (!/^\d+$/.test(nq)) {
+    const placesP = nq.length >= 3 ? geocode(q) : Promise.resolve([]);
     for (const c of CATALOG) if (norm(c.n).includes(nq)) { items.push({ kind: 'huc', c }); if (items.length >= 6) break; }
     const k = /^[a-z0-9]/.test(nq) ? nq[0] : '_';
     const rows = await nameShard(k);
@@ -799,11 +934,14 @@ async function runSearch(q) {
         items.push({ kind: 'river', r }); if (++n >= 12) break;
       }
     }
+    for (const p of await placesP) items.push({ kind: 'place', p });
   }
   if ($('#search').value.trim() !== q) return; // stale
   searchItems = items; searchSel = -1;
   const hucs = items.filter((i) => i.kind === 'huc'), rivers = items.filter((i) => i.kind === 'river'), reaches = items.filter((i) => i.kind === 'reach');
+  const places = items.filter((i) => i.kind === 'place');
   const rowHtml = (it, idx) => {
+    if (it.kind === 'place') return `<button class="res" role="option" data-i="${idx}"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span><span class="t">${esc(it.p.name)}</span><span class="m">${esc(it.p.detail)}</span></button>`;
     if (it.kind === 'huc') return `<button class="res" role="option" data-i="${idx}"><span class="dot" style="background:${STATUS[it.c.s].color}"></span><span class="t">${esc(it.c.n)}</span><span class="m">HUC8 ${it.c.h} · ${esc(it.c.st || '')}</span></button>`;
     if (it.kind === 'river') {
       const [name, o, km, , hucs2] = it.r;
@@ -815,9 +953,11 @@ async function runSearch(q) {
   let html = '';
   const idx = (it) => items.indexOf(it);
   if (reaches.length) html += '<h4>Reach</h4>' + reaches.map((it) => rowHtml(it, idx(it))).join('');
+  if (places.length) html += '<h4>Places</h4>' + places.map((it) => rowHtml(it, idx(it))).join('');
   if (rivers.length) html += '<h4>Rivers and streams</h4>' + rivers.map((it) => rowHtml(it, idx(it))).join('');
   if (hucs.length) html += '<h4>Watersheds</h4>' + hucs.map((it) => rowHtml(it, idx(it))).join('');
-  box.innerHTML = html || '<div class="empty">No matches. Try a river name, a watershed name, or an 8-digit HUC code.</div>';
+  box.innerHTML = (html || '<div class="empty">No matches. Try a town, a river, a watershed name, or an 8-digit HUC code.</div>')
+    + (places.length ? '<div class="empty small">Place search: Photon / © OpenStreetMap</div>' : '');
   box.hidden = false; $('#search').setAttribute('aria-expanded', 'true');
 }
 
@@ -826,6 +966,12 @@ function chooseSearch(i) {
   if (!it) return;
   $('#search-results').hidden = true;
   if (it.kind === 'huc') { selectHuc(it.c.h); return; }
+  if (it.kind === 'place') {
+    const p = it.p;
+    if (p.bbox) map.fitBounds([[p.bbox[0], p.bbox[1]], [p.bbox[2], p.bbox[3]]], { padding: 60, maxZoom: 14 });
+    else map.flyTo({ center: p.center, zoom: 13 });
+    return;
+  }
   if (it.kind === 'river') {
     const [name, , , , , b] = it.r;
     highlightName(name);
@@ -844,7 +990,7 @@ function chooseSearch(i) {
 
 function bindSearch() {
   const input = $('#search');
-  input.addEventListener('input', debounce(() => runSearch(input.value.trim()), 160));
+  input.addEventListener('input', debounce(() => runSearch(input.value.trim()), 250));
   input.addEventListener('keydown', (e) => {
     const opts = $$('#search-results .res');
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -1056,6 +1202,10 @@ async function boot() {
   if (STATS) fillAbout();
   const h = getHashParam('huc');
   if (h) map.once('load', () => selectHuc(h, { fly: !getHashParam('map') }));
+  if (!store.get('seenIntro', false) && !h && !navigator.webdriver) {
+    $('#dlg-intro').showModal();
+    $('#dlg-intro').addEventListener('close', () => store.set('seenIntro', true), { once: true });
+  }
   window.__nfm = { map, state, tileValues, LUT: () => LUT, refreshFlood };
 }
 boot();

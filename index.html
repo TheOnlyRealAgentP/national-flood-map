@@ -26,7 +26,7 @@
   </div>
   <div class="search" role="search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-    <input id="search" type="search" placeholder="Search rivers, watersheds, HUC8 codes, reach IDs" autocomplete="off" aria-label="Search rivers and watersheds" aria-controls="search-results" aria-expanded="false">
+    <input id="search" type="search" placeholder="Search a place, river, watershed or HUC8 code" autocomplete="off" aria-label="Search rivers and watersheds" aria-controls="search-results" aria-expanded="false">
     <div id="search-results" class="search-results" role="listbox" hidden></div>
   </div>
   <nav class="actions">
@@ -41,13 +41,22 @@
         <a href="data/metadata.json" download>Dataset metadata (JSON)<small>Sources, methods, data dictionary</small></a>
       </div>
     </div>
+    <button class="btn" id="btn-share" title="Copy a link to this view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Share</span></button>
     <button class="btn" id="btn-about"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg><span>About</span></button>
     <button class="icon-btn" id="btn-theme" aria-label="Color theme" title="Color theme: automatic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" class="fill"/></svg></button>
   </nav>
 </header>
 
 <main class="layout">
+  <div class="loading" id="loading" hidden></div>
+  <button class="fab" id="btn-open-left" hidden aria-label="Show layers and legend">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg><span>Layers</span>
+  </button>
+  <div class="mini-legend" id="mini-legend" hidden></div>
   <aside class="panel left" id="panel-left" aria-label="Layers and legend">
+    <button class="icon-btn collapse" id="btn-collapse-left" aria-label="Hide panel" title="Hide panel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
     <section class="card">
       <div class="card-head">
         <h2>Flood extent</h2>
@@ -57,6 +66,19 @@
         </div>
       </div>
       <p class="hint" id="mode-hint">Each place is colored by the most frequent flood that reaches it.</p>
+      <div class="rp-slider" id="rp-slider" hidden>
+        <div class="rp-head">
+          <span class="sw" id="rp-swatch"></span>
+          <strong id="rp-label">100-year flood</strong>
+          <span class="chance" id="rp-chance">1% chance each year</span>
+          <button class="icon-btn small" id="rp-play" aria-label="Play through return periods" title="Play through return periods">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path class="play" d="M8 5v14l11-7z"/></svg>
+          </button>
+        </div>
+        <input type="range" id="rp-range" min="0" max="6" step="1" value="5" aria-label="Return period" list="rp-ticks">
+        <div class="rp-ticks" aria-hidden="true"><span>2</span><span>5</span><span>10</span><span>25</span><span>50</span><span>100</span><span>500</span></div>
+        <p class="hint" id="rp-desc"></p>
+      </div>
       <ul class="legend" id="legend"></ul>
       <label class="row slider">Opacity <input type="range" id="opacity" min="0.2" max="1" step="0.05" value="0.85" aria-label="Flood layer opacity"></label>
       <p class="note" id="note-500"></p>
@@ -81,6 +103,7 @@
         <button role="radio" aria-checked="true" data-proj="globe">Globe</button>
         <button role="radio" aria-checked="false" data-proj="mercator">Flat</button>
       </div>
+      <label class="row check"><input type="checkbox" id="lyr-terrain"> 3D terrain <span class="sub">tilt with right-drag or two fingers</span></label>
     </section>
 
     <section class="card">
@@ -113,6 +136,19 @@
 </main>
 
 <div class="toast" id="toast" role="status" hidden></div>
+
+<dialog id="dlg-intro" class="intro" aria-labelledby="intro-title">
+  <h2 id="intro-title">Where rivers go when they flood</h2>
+  <p>This map shows the land modeled to flood along US rivers and streams, from the frequent 2-year flood
+  to the rare 100- and 500-year floods, for more than 2,100 watersheds.</p>
+  <ul class="intro-list">
+    <li><span class="n">1</span><span><strong>Search</strong> a town, river or watershed, or just zoom in.</span></li>
+    <li><span class="n">2</span><span><strong>Click</strong> a flooded spot to see which floods reach it; click a stream for its flows.</span></li>
+    <li><span class="n">3</span><span><strong>Switch to “One period”</strong> and slide through return periods to watch the floodplain grow.</span></li>
+  </ul>
+  <p class="muted small">A research product, not a regulatory flood map. <a href="#" data-open="about">How it was made</a></p>
+  <div class="intro-actions"><button class="btn primary" data-close autofocus>Explore the map</button></div>
+</dialog>
 
 <dialog id="dlg-stats" class="sheet" aria-labelledby="stats-title">
   <div class="sheet-head">

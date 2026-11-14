@@ -46,23 +46,29 @@ def spike(user):
     from huggingface_hub import HfApi
     api = HfApi()
     api.create_repo(repo_id(user), repo_type="dataset", exist_ok=True, private=False)
-    test = os.path.join(SITE_DATA, "huc8.pmtiles")
-    api.upload_file(path_or_fileobj=test, path_in_repo="test/huc8.pmtiles", repo_id=repo_id(user), repo_type="dataset",
+    test = os.path.join(os.path.dirname(DIST), "build", "work", "spike_states.pmtiles")
+    api.upload_file(path_or_fileobj=test, path_in_repo="test/spike.pmtiles", repo_id=repo_id(user), repo_type="dataset",
                     commit_message="hosting check: small PMTiles file")
     time.sleep(3)
-    ok = check_range(resolve_url(user, "test/huc8.pmtiles"))
+    ok = check_range(resolve_url(user, "test/spike.pmtiles"))
     print("SPIKE", "PASSED" if ok else "FAILED")
     return ok
 
 
-def upload(user):
+def upload(user, only=None):
+    """Upload dist/ (or only the files matching `only`, comma-separated globs). Content already on
+    HF is deduplicated by its storage, so re-running after more files are built is cheap."""
     from huggingface_hub import HfApi
     api = HfApi()
     api.create_repo(repo_id(user), repo_type="dataset", exist_ok=True, private=False)
-    api.upload_large_folder(repo_id=repo_id(user), repo_type="dataset", folder_path=DIST,
-                            ignore_patterns=["*.partial*", "*.tmp"], num_workers=8)
+    api.upload_folder(repo_id=repo_id(user), repo_type="dataset", folder_path=DIST,
+                      allow_patterns=only.split(",") if only else None,
+                      ignore_patterns=["*.partial*", "*.tmp", ".cache/*"],
+                      commit_message=f"data: {only or 'all files'}")
+    if only:
+        return
     try:
-        api.delete_file("test/huc8.pmtiles", repo_id=repo_id(user), repo_type="dataset", commit_message="remove hosting test file")
+        api.delete_file("test/spike.pmtiles", repo_id=repo_id(user), repo_type="dataset", commit_message="remove hosting test file")
     except Exception:
         pass
     for f in ("flood.pmtiles", "streams.pmtiles"):
@@ -70,4 +76,4 @@ def upload(user):
 
 
 if __name__ == "__main__":
-    {"spike": spike, "upload": upload}[sys.argv[1]](sys.argv[2])
+    {"spike": spike, "upload": upload}[sys.argv[1]](*sys.argv[2:])

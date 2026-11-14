@@ -67,15 +67,28 @@ def streams_path(h):
     if zips:
         os.makedirs(TMP, exist_ok=True)
         dst = os.path.join(TMP, f"{h}_streams.gpkg")
-        with zipfile.ZipFile(zips[0]) as z, z.open(f"{h}/nwm_subset_streams.gpkg") as src, open(dst, "wb") as out:
-            shutil.copyfileobj(src, out, 1 << 20)
-        return dst, dst
+        for attempt in range(4):
+            try:
+                with zipfile.ZipFile(zips[0]) as z, z.open(f"{h}/nwm_subset_streams.gpkg") as src, open(dst, "wb") as out:
+                    shutil.copyfileobj(src, out, 1 << 20)
+                return dst, dst
+            except zipfile.BadZipFile:
+                # Box Drive serves a not-yet-downloaded file as zeros past what it has fetched, so the
+                # zip's end record is missing. Reading the whole file sequentially makes Box fetch it.
+                if attempt == 3:
+                    raise
+                with open(zips[0], "rb") as f:
+                    while f.read(8 << 20):
+                        pass
+                time.sleep(5 * (attempt + 1))
     return None, None
 
 
 def catchments_path(h):
     hits = glob.glob(os.path.join(USA_DIR, "*", f"{h}_*", "raw", "nwm_catchments_proj_subset.gpkg")) + \
-        glob.glob(os.path.join(USA_DIR, "*", "*", f"{h}_*", "raw", "nwm_catchments_proj_subset.gpkg"))
+        glob.glob(os.path.join(USA_DIR, "*", "*", f"{h}_*", "raw", "nwm_catchments_proj_subset.gpkg")) + \
+        glob.glob(os.path.join(BOX_TERRAIN, "*", f"flood_{h}", h, "nwm_catchments_proj_subset.gpkg"))
+    hits = [p for p in hits if os.path.getsize(p) > 0]  # 10230006's organized copy is 0 bytes
     return hits[0] if hits else None
 
 

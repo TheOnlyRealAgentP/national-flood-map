@@ -5,7 +5,7 @@
   "authors": "National Flood Map contributors",
   "year": 2026,
   "site_url": "https://theonlyrealagentp.github.io/national-flood-map/",
-  "data_url": "https://huggingface.co/datasets/HF_USER/national-flood-map-data",
+  "data_url": "https://huggingface.co/datasets/TheOnlyRealAgentP/national-flood-map-data",
   "code_license": "MIT",
   "data_license": "CC BY 4.0"
 }

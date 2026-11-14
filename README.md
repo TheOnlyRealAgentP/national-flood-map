@@ -7,7 +7,7 @@ flooded area, open any watershed for its metadata and downloads, or browse natio
 statistics.
 
 **Live map:** https://theonlyrealagentp.github.io/national-flood-map/
-**Data (tiles, GeoTIFFs, reach tables):** https://huggingface.co/datasets/HF_USER/national-flood-map-data
+**Data (tiles, GeoTIFFs, reach tables):** https://huggingface.co/datasets/TheOnlyRealAgentP/national-flood-map-data
 
 > Research product. Not a FEMA regulatory flood map; not for insurance, permitting,
 > property or emergency decisions. Extents only, no depth.
