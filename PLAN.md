@@ -163,3 +163,7 @@ GitHub Pages (repo national-flood-map)          Hugging Face dataset (national-f
 - 2026-11-14: published: flood.pmtiles, cogs/ (2,107, 4.09 GB), reaches/ (2,109 CSVs), search/ ID shards
   (42 MB, moved off Pages), metadata.json, dataset card on HF; site commits 09bd11b, fa17fc0, cbd3521.
   Live UI check 12/15 (the 3 failures are the stream tiles, still building).
+- 2026-11-14: **launched.** streams.pmtiles (1.49 GB, z3-12, 183,558 tiles, GDAL MVT in 66 min) uploaded.
+  HF dataset: flood.pmtiles, streams.pmtiles, 2,107 GeoTIFFs, 2,109 reach CSVs, 256 ID shards,
+  metadata.json, README (test file removed). Live `tests/ui_check.py` 15/15; extra live checks: feature-ID
+  search -> Ogden River 10275840, About coverage/citation/dictionary, GeoTIFF + CSV downloads 206 with CORS.
