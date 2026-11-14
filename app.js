@@ -38,6 +38,15 @@ const RAMP = {
   dark:  ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#184f95'],
 };
 const SINGLE = { light: '#1c5cab', dark: '#86b6ef' };
+// Zoomed-out view: watersheds shaded by the percent of their area in the 100-year floodplain
+// (sequential blue; the lightest step means "near zero" and recedes toward the surface).
+const SHARE_BREAKS = [1, 2.5, 5, 10, 20];
+const SHARE = {
+  light: ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#1c5cab', '#0d366b'],
+  dark:  ['#104281', '#1c5cab', '#2a78d6', '#5598e7', '#86b6ef', '#cde2fb'],
+};
+const SHARE_LABELS = ['< 1%', '1–2.5%', '2.5–5%', '5–10%', '10–20%', '≥ 20%'];
+const HANDOFF_ZOOM = 6.5; // below: watershed shading; above: the flood raster
 const STATUS = {
   mapped: { label: 'Mapped', color: '#2a78d6' },
   dry:    { label: 'Run, no discharge', color: '#eb6834' },
@@ -70,7 +79,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('nfm_' + k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 const fmt = (n, d = 0) => n == null || Number.isNaN(n) ? '–' : Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
-const fmtSig = (n) => n == null || Number.isNaN(n) ? '–' : (Math.abs(n) >= 100 ? fmt(n, 0) : Math.abs(n) >= 10 ? fmt(n, 1) : fmt(n, 2));
+const fmtSig = (n) => n == null || Number.isNaN(n) ? '–' : n === 0 ? '0' : (Math.abs(n) >= 100 ? fmt(n, 0) : Math.abs(n) >= 10 ? fmt(n, 1) : fmt(n, 2));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const norm = (s) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim();
 
@@ -285,6 +294,10 @@ function buildStyle() {
           'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 5, 0.5, 12, 2.5, 16, 11] } },
       { id: 'coverage', type: 'fill', source: 'huc8', 'source-layer': 'huc8', layout: { visibility: vis(state.coverage) },
         paint: { 'fill-color': coverageColor, 'fill-opacity': 0.35 } },
+      { id: 'share', type: 'fill', source: 'huc8', 'source-layer': 'huc8', maxzoom: 7.5,
+        filter: ['has', 'f'], layout: { visibility: vis(!state.coverage) },
+        paint: { 'fill-color': ['step', ['get', 'f'], ...SHARE[themeKey()].flatMap((c, i) => (i ? [SHARE_BREAKS[i - 1], c] : [c]))],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.85, 5.5, 0.8, 7, 0] } },
       { id: 'flood', type: 'raster', source: 'flood',
         paint: { 'raster-opacity': floodOpacity(), 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } },
       { id: 'streams-case', type: 'line', source: 'streams', 'source-layer': 'streams', layout: { visibility: vis(state.streams), 'line-cap': 'round', 'line-join': 'round' },
@@ -366,8 +379,20 @@ function initMap() {
   // thin loading bar while tiles are in flight (shown only if loading lasts > 250 ms)
   let loadT = null;
   map.on('dataloading', () => { if (!loadT) loadT = setTimeout(() => { $('#loading').hidden = false; }, 250); });
-  map.on('idle', () => { clearTimeout(loadT); loadT = null; $('#loading').hidden = true; });
-  map.once('load', () => { if (state.terrain) applyTerrain(false); });
+  // 'idle' never fires while any source has failed, so also clear the bar once rendered tiles are in
+  const doneLoading = () => { clearTimeout(loadT); loadT = null; $('#loading').hidden = true; };
+  map.on('idle', doneLoading);
+  map.on('render', () => { if (loadT || !$('#loading').hidden) { if (map.areTilesLoaded()) doneLoading(); } });
+  map.once('load', () => {
+    if (state.terrain) applyTerrain(false);
+    renderShareLegend(); renderMiniLegend();
+    if (innerWidth <= 760) $('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+  });
+  let wasOut = null;
+  map.on('zoomend', () => {
+    const out = map.getZoom() < HANDOFF_ZOOM;
+    if (out !== wasOut) { wasOut = out; renderShareLegend(); renderMiniLegend(); }
+  });
 
   let hovered = null;
   const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
@@ -385,7 +410,9 @@ function initMap() {
       hoverPopup.setLngLat(e.lngLat).setHTML(`<strong>${esc(reach.properties.n || 'Unnamed reach')}</strong><br>100-yr ${fmtSig(reach.properties.q100)} m³/s`).addTo(map);
     } else if (huc && map.getZoom() < 9) {
       const c = BY_HUC.get(h);
-      hoverPopup.setLngLat(e.lngLat).setHTML(`<strong>${esc(c ? c.n : h)}</strong><br>HUC8 ${esc(h)} · ${esc(STATUS[c?.s]?.label || '')}`).addTo(map);
+      const f = huc.properties.f;
+      hoverPopup.setLngLat(e.lngLat).setHTML(`<strong>${esc(c ? c.n : h)}</strong><br>HUC8 ${esc(h)} · `
+        + (f != null ? `${fmt(f, 1)}% in the 100-year floodplain` : esc(STATUS[c?.s]?.label || ''))).addTo(map);
     } else hoverPopup.remove();
   });
   map.on('mouseout', () => hoverPopup.remove());
@@ -437,7 +464,7 @@ function pickReach(point) {
 // fading the layer there keeps regional views calm, and it reaches full strength by zoom 11.
 function floodOpacity() {
   const o = state.opacity;
-  return ['interpolate', ['linear'], ['zoom'], 5, o * 0.6, 8, o * 0.7, 11, o];
+  return ['interpolate', ['linear'], ['zoom'], 5.5, 0, 7, o * 0.65, 9, o * 0.75, 11, o];
 }
 
 function restyle() {
@@ -474,6 +501,7 @@ function renderLegend() {
   $('#rp-label').textContent = `${state.single}-year flood`;
   $('#rp-chance').textContent = `${CHANCE[state.single]} chance each year`;
   $('#rp-desc').textContent = DESC[state.single];
+  renderShareLegend();
   renderMiniLegend();
   $('#note-500').textContent = has500
     ? `500-year extents exist only where the LP-III method was used (${fmt(has500)} watersheds). Elsewhere the 100-year flood is the largest.`
@@ -482,8 +510,25 @@ function renderLegend() {
     `<li><span class="sw" style="background:${s.color};opacity:.7"></span>${s.label}<span class="chance">${fmt(STATS?.coverage.status[k] || 0)}</span></li>`).join('');
 }
 
+function renderShareLegend() {
+  const el = $('#share-legend');
+  if (!el) return;
+  const out = map ? map.getZoom() < HANDOFF_ZOOM : true;
+  el.hidden = !out || state.coverage;
+  el.innerHTML = `<div class="share-title">Zoomed out: share of each watershed in the 100-year floodplain</div>
+    <div class="share-bar">${SHARE[themeKey()].map((c, i) => `<span style="background:${c}" title="${SHARE_LABELS[i]}"></span>`).join('')}</div>
+    <div class="share-lab"><span>0</span>${SHARE_BREAKS.map((b) => `<span>${b}%</span>`).join('')}<span></span></div>
+    <div class="hint">Zoom in to see the mapped flood extents.</div>`;
+}
+
 function renderMiniLegend() {
   const el = $('#mini-legend');
+  if (map && map.getZoom() < HANDOFF_ZOOM && !state.coverage) {
+    el.innerHTML = `<div><strong>Share in the 100-year floodplain</strong></div>
+      <div class="bar">${SHARE[themeKey()].map((c) => `<span style="background:${c}"></span>`).join('')}</div>
+      <div class="lab"><span>0</span>${SHARE_BREAKS.map((b) => `<span>${b}%</span>`).join('')}</div>`;
+    return;
+  }
   if (state.mode === 'single') {
     el.innerHTML = `<div><span class="sw" style="display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;background:${SINGLE[themeKey()]}"></span>
       <strong>${state.single}-year flood</strong> · ${CHANCE[state.single]} chance each year</div>`;
@@ -500,7 +545,7 @@ function setLeftCollapsed(c) {
   state.leftCollapsed = c;
   $('#panel-left').classList.toggle('collapsed', c);
   $('#btn-open-left').hidden = !c;
-  $('#mini-legend').hidden = !c;
+  $('#mini-legend').hidden = !(c || innerWidth <= 760);
   document.documentElement.style.setProperty('--left-w', c ? '0px' : '320px');
   saveState();
 }
@@ -544,7 +589,7 @@ function bindControls() {
   });
   const layerToggle = (id, key) => $(id).addEventListener('change', (e) => {
     state[key] = e.target.checked; saveState(); restyle();
-    if (key === 'coverage') $('#coverage-legend').hidden = !state.coverage;
+    if (key === 'coverage') { $('#coverage-legend').hidden = !state.coverage; renderShareLegend(); renderMiniLegend(); }
   });
   layerToggle('#lyr-streams', 'streams');
   layerToggle('#lyr-huc8', 'huc8');
@@ -620,6 +665,7 @@ function syncControls() {
   $('#lyr-terrain').checked = state.terrain;
   $('#coverage-legend').hidden = !state.coverage;
   if (state.leftCollapsed && innerWidth > 760) setLeftCollapsed(true);
+  if (innerWidth <= 760) $('#mini-legend').hidden = false; // phones: the panel is a closed bottom sheet
 }
 
 function applyTerrain(animate) {
@@ -744,12 +790,14 @@ function hucHtml(c) {
     ...(c.nb ? [['Nesting breaks', `${fmt(c.nb)} px <span class="sub" title="Pixels wet at a shorter return period but dry at a longer one">?</span>`]] : []),
   ];
   const base = CONFIG.dataBase;
+  const anyWet = Object.values(c.w || {}).some((v) => v > 0);
   return head + kv(rows)
-    + `<div class="section-title">Flooded area by return period</div>` + barChart(bars, 'km²')
+    + (anyWet ? `<div class="section-title">Flooded area by return period</div>` + barChart(bars, 'km²')
+      : '<p class="msg">The model found no flooding beyond the channel at any return period here (a small coastal watershed).</p>')
     + table(['Return period', 'Annual chance', 'Flooded km²'], periods.map((p) => [`${p}-year`, CHANCE[p], fmt(c.w[String(p)], 2)]))
     + `<div class="section-title" id="downloads">Downloads</div>
       <div class="downloads">
-        <a href="${base}cogs/${c.h}.tif" download>Flood extent GeoTIFF<small>bit mask, all periods</small></a>
+        ${anyWet ? `<a href="${base}cogs/${c.h}.tif" download>Flood extent GeoTIFF<small>bit mask, all periods</small></a>` : ''}
         <a href="${base}reaches/${c.h}.csv" download>Reach table (CSV)<small>${fmt(c.r)} reaches</small></a>
         <button data-meta>Metadata (JSON)<small>this watershed</small></button>
       </div>`;
@@ -882,10 +930,21 @@ async function nameShard(k) {
   if (!nameShards.has(k)) nameShards.set(k, loadJSON(`data/search/n_${k}.json`).catch(() => []));
   return nameShards.get(k);
 }
+// Feature-ID shards live with the big data: sorted ids as deltas, coordinates in 1e-4 degrees.
+const idShards = new Map();
 async function idLookup(id) {
   const shard = (BigInt(id) % 256n).toString(16).padStart(2, '0');
-  const d = await loadJSON(`data/search/i_${shard}.json`).catch(() => ({}));
-  return d[String(id)] || null;
+  if (!idShards.has(shard)) idShards.set(shard, loadJSON(`${CONFIG.dataBase}search/i_${shard}.json`).catch(() => null));
+  const d = await idShards.get(shard);
+  if (!d) return null;
+  const want = Number(id);
+  let cur = 0;
+  for (let i = 0; i < d.d.length; i++) {
+    cur += d.d[i];
+    if (cur === want) return [d.x[i] / 1e4, d.y[i] / 1e4];
+    if (cur > want) break;
+  }
+  return null;
 }
 
 // Places and addresses: Photon (komoot), an OpenStreetMap geocoder that is free and keyless.
@@ -981,10 +1040,10 @@ function chooseSearch(i) {
   }
   if (it.kind === 'reach') {
     map.flyTo({ center: it.at, zoom: 13 });
-    map.once('idle', () => {
+    map.once('moveend', () => waitTiles(8000).then(() => {
       const f = map.querySourceFeatures('streams', { sourceLayer: 'streams', filter: ['==', ['get', 'id'], Number(it.id)] })[0];
       if (f) selectReach(f);
-    });
+    }));
   }
 }
 
@@ -1113,7 +1172,7 @@ function downloadCatalogCsv() {
 
 async function exportPng() {
   toast('Preparing image…');
-  await new Promise((res) => { if (map.loaded() && map.areTilesLoaded()) res(); else map.once('idle', res); });
+  await waitTiles(8000);
   map.triggerRepaint();
   await new Promise((res) => map.once('render', res));
   const src = map.getCanvas();
@@ -1151,6 +1210,17 @@ async function exportPng() {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
     toast('Image saved');
   }, 'image/png');
+}
+// Resolves when the visible tiles are loaded (or after `ms`), without relying on 'idle',
+// which a failed source would block forever.
+function waitTiles(ms) {
+  return new Promise((res) => {
+    if (map.areTilesLoaded()) return res();
+    const t = setTimeout(done, ms);
+    function check() { if (map.areTilesLoaded()) done(); }
+    function done() { clearTimeout(t); map.off('render', check); map.off('idle', done); res(); }
+    map.on('render', check); map.on('idle', done);
+  });
 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);

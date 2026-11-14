@@ -2,7 +2,7 @@
   "title": "National Flood Map: return-period flood extents for US watersheds",
   "short_title": "National Flood Map",
   "version": "1.0.0",
-  "authors": "National Flood Map contributors",
+  "authors": "Harrison Stewart",
   "year": 2026,
   "site_url": "https://theonlyrealagentp.github.io/national-flood-map/",
   "data_url": "https://huggingface.co/datasets/TheOnlyRealAgentP/national-flood-map-data",

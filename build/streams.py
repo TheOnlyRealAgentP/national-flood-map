@@ -124,17 +124,25 @@ def stage_search():
         with open(os.path.join(out_dir, f"n_{k}.json"), "w", encoding="utf-8") as f:
             json.dump(rows, f, separators=(",", ":"))
     log(f"search: {len(groups)} named rivers/streams in {len(shards)} name shards")
-    # feature-ID lookup: id -> [lon, lat] of the reach midpoint bbox centre, sharded by id % 256
+    # feature-ID lookup (served from the data host, dist/search/): id -> reach bbox centre, sharded by
+    # id % 256. Compact: sorted ids as deltas, lon/lat as integers of 1e-4 degrees.
     ids = g["feature_id"].astype("int64").to_numpy()
-    cx = ((g.minx + g.maxx) / 2).round(4).to_numpy()
-    cy = ((g.miny + g.maxy) / 2).round(4).to_numpy()
+    cx = np.round((g.minx.to_numpy() + g.maxx.to_numpy()) / 2 * 1e4).astype("int64")
+    cy = np.round((g.miny.to_numpy() + g.maxy.to_numpy()) / 2 * 1e4).astype("int64")
+    id_dir = os.path.join(DIST, "search")
+    os.makedirs(id_dir, exist_ok=True)
     shard = ids % 256
     for s in range(256):
         m = shard == s
-        d = {str(i): [float(x), float(y)] for i, x, y in zip(ids[m], cx[m], cy[m])}
-        with open(os.path.join(out_dir, f"i_{s:02x}.json"), "w", encoding="utf-8") as f:
+        order = np.argsort(ids[m])
+        si, sx, sy = ids[m][order], cx[m][order], cy[m][order]
+        d = {"d": np.diff(si, prepend=0).tolist(), "x": sx.tolist(), "y": sy.tolist()}
+        with open(os.path.join(id_dir, f"i_{s:02x}.json"), "w", encoding="utf-8") as f:
             json.dump(d, f, separators=(",", ":"))
-    log(f"search: {len(ids)} feature IDs in 256 shards")
+    for old in os.listdir(out_dir):  # earlier builds kept these with the site
+        if old.startswith("i_"):
+            os.remove(os.path.join(out_dir, old))
+    log(f"search: {len(ids)} feature IDs in 256 shards (dist/search)")
 
 
 def stage_csv():

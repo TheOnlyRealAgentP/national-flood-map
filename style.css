@@ -199,7 +199,8 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 
 /* ---------- charts ---------- */
 .chart { position: relative; margin: 4px 0 8px; }
-.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; stroke: none; fill: none; }
+.chart svg text { stroke: none; font-weight: 400; }
 .chart .grid line { stroke: var(--border); stroke-width: 1; }
 .chart .axis text { fill: var(--muted); font-size: 11px; }
 .chart .bar { fill: var(--accent); }
@@ -296,6 +297,16 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.35); }
 .btn.primary:hover { background: var(--accent-ink); }
 :root[data-theme="dark"] .btn.primary, .dark-map .btn.primary { color: #0b0b0b; }
 
+/* ---------- zoomed-out legend ---------- */
+.share-legend { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.share-title { font-size: 12px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
+.share-bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; }
+.share-bar span { flex: 1; }
+.share-lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.share-lab span { flex: 1; text-align: left; transform: translateX(-30%); }
+.share-lab span:first-child { transform: none; }
+.share-legend .hint { margin: 6px 0 0; }
+
 /* ---------- intro ---------- */
 dialog.intro {
   width: min(460px, calc(100vw - 32px)); padding: 22px 24px 18px; border: 1px solid var(--border); border-radius: 16px;
@@ -332,12 +343,21 @@ dialog.intro p { color: var(--text-2); margin: 0 0 12px; }
   .maplibregl-ctrl-bottom-left { left: 0; }
   .grid2 { grid-template-columns: 1fr; }
   .seg button { min-height: 40px; }
+  .brand { min-width: 0; overflow: hidden; }
+  .brand h1 { overflow: hidden; text-overflow: ellipsis; }
+  .actions { gap: 2px; }
+  .actions .btn { border-color: transparent; padding: 0 7px; }
   .row { padding: 9px 0; }
   .legend li { padding: 6px 0; }
   .huc-list li button { padding: 10px 4px; }
-  .panel.left .collapse, .fab, .mini-legend { display: none !important; }
+  .panel.left .collapse, .fab { display: none !important; }
+  .mini-legend { left: 10px; bottom: 40px; padding: 6px 8px; }
+  .mini-legend .bar, .mini-legend .lab { width: 170px; }
   .panel.left.collapsed { display: block; }
-  .mini-legend { bottom: 36px; }
   #rp-range { height: 32px; }
+}
+@media (max-width: 480px) {
+  .brand h1, .brand .tagline { display: none; }
+  #btn-share { display: none; }
   dialog.sheet { width: 100vw; max-width: 100vw; max-height: 100vh; height: 100vh; margin: 0; border-radius: 0; }
 }

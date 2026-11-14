@@ -53,7 +53,7 @@ try:
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.goto(base + "#map=7.5/40.9/-111.3", wait_until="domcontentloaded")
-        page.wait_for_function("window.__nfm && window.__nfm.map && window.__nfm.map.loaded()", timeout=60000)
+        page.wait_for_function("window.__nfm && window.__nfm.map && window.__nfm.map.style && window.__nfm.map.style._loaded", timeout=60000)
         page.wait_for_function("window.__nfm.map.areTilesLoaded()", timeout=90000)
         time.sleep(2)
         shot(page, "01_utah_z7")
@@ -91,7 +91,13 @@ try:
         # single-period mode repaints
         page.click("[data-mode=single]")
         time.sleep(1.5)
-        check("single-period legend has radios", page.locator("#legend input[type=radio]").count() == 7)
+        page.fill("#rp-range", "1")
+        page.dispatch_event("#rp-range", "input")
+        time.sleep(0.5)
+        check("single-period slider shows and steps", page.is_visible("#rp-slider")
+              and page.inner_text("#rp-label") == "5-year flood", page.inner_text("#rp-label"))
+        lut = page.evaluate("(() => { const l = window.__nfm.LUT(); return [l[2*4+3], l[1*4+3]]; })()")
+        check("single 5-yr: pixel with bit 1 colored, bit 0 only not", lut == [255, 0], str(lut))
         page.click("[data-mode=stacked]")
 
         # globe <-> flat
@@ -112,7 +118,17 @@ try:
             time.sleep(2)
             txt = page.inner_text("#details")
             shot(page, "03_huc_panel")
-            check("HUC8 panel shows flooded area", "Flooded area" in txt and "Upper Weber" in txt, txt[:80].replace("\n", " | "))
+            check("HUC8 panel shows flooded area", "flooded area" in txt.lower() and "Upper Weber" in txt
+                  and "23.23" in txt, txt[:80].replace("\n", " | "))
+
+            # place search (Photon geocoder)
+            page.fill("#search", "Ogden, Utah")
+            try:
+                page.wait_for_selector("#search-results h4:has-text('Places')", timeout=15000)
+                check("place search returns places", True)
+            except Exception:
+                check("place search returns places", False, page.inner_text("#search-results")[:120])
+            page.keyboard.press("Escape")
 
             # search a river
             page.fill("#search", "weber")

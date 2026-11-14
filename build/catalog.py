@@ -133,10 +133,10 @@ def main():
              "h2": huc2.get(h[:2]), "h4": huc4.get(h[:4]), "h6": huc6.get(h[:6])}
         if info:
             wet = {int(k): v for k, v in info["wet_km2"].items()}
-            if max(wet.values()) == 0:
+            if h not in per_huc.index:
                 e["s"] = "dry"   # ran, but no return-period discharge (CIROH covers CONUS only)
             else:
-                e["s"] = "mapped"
+                e["s"] = "mapped"  # includes two coastal HUC8s whose modeled floods are all dry
             f = facts[h]
             e.update({
                 "m": METHOD_NAMES.get(f["mode"], f["mode"]),
@@ -215,10 +215,30 @@ def main():
         json.dump(stats, f, separators=(",", ":"))
     log(f"stats: {json.dumps(stats['coverage'])}")
 
-    # ------------------------------------------------------------ HUC8 tiles
+    huc8_tiles(huc8, cat)
+
+
+def huc8_tiles(huc8=None, cat=None):
+    """data/huc8.pmtiles: HUC8 polygons with code, name, states, status and f = percent of the
+    watershed's area inside the 100-year floodplain (mapped watersheds only)."""
+    import geopandas as gpd
     from osgeo import gdal
+    if huc8 is None:
+        huc8 = gpd.read_file(os.path.join(BOUNDARIES, "us_huc8s.geojson"))
+        huc8["HUC8"] = huc8["HUC8"].astype(str).str.zfill(8)
+    if cat is None:
+        with open(os.path.join(SITE_DATA, "catalog.json"), encoding="utf-8") as f:
+            cat = json.load(f)["hucs"]
     g8 = huc8[["HUC8", "name", "states", "geometry"]].rename(columns={"HUC8": "h", "name": "n", "states": "st"})
-    g8["s"] = g8.h.map({e["h"]: e["s"] for e in cat})
+    by = {e["h"]: e for e in cat}
+    g8["s"] = g8.h.map(lambda h: by[h]["s"])
+
+    def share(h):
+        e = by[h]
+        if e["s"] != "mapped" or not e.get("a"):
+            return None
+        return round(100 * e["w"].get("100", 0) / e["a"], 2)
+    g8["f"] = g8.h.map(share)
     g8["geometry"] = g8.geometry.simplify(0.0005)
     tmp = os.path.join(WORK, "huc8_web.fgb")
     g8.to_file(tmp, driver="FlatGeobuf")
@@ -232,4 +252,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "tiles":
+        huc8_tiles()   # rebuild data/huc8.pmtiles from data/catalog.json only
+    else:
+        main()
